@@ -1,8 +1,8 @@
 #!/bin/bash
 #============================================================================
 # 01_download_offline.sh
-# 在有网络的 Ubuntu 24.04 上运行，下载 PXE 服务所需的全部 deb 包
-# 产出：./offline_debs/ 目录
+# Run on a networked Ubuntu 24.04 to download all deb packages needed for PXE service
+# Output: ./offline_debs/ directory
 #============================================================================
 
 set -e
@@ -14,8 +14,8 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEB_DIR="${SCRIPT_DIR}/offline_debs"
 
-info "========== Ubuntu 24.04 离线 deb 包下载 =========="
-[[ $EUID -ne 0 ]] && error "请使用 root 运行"
+info "========== Ubuntu 24.04 Offline deb Download =========="
+[[ $EUID -ne 0 ]] && error "Must run as root"
 
 rm -rf "${DEB_DIR}"
 mkdir -p "${DEB_DIR}"
@@ -29,12 +29,12 @@ PACKAGES=(
     curl
 )
 
-info "解析依赖..."
+info "Resolving dependencies..."
 ALL_DEPS=$(apt-cache depends --recurse --no-recommends --no-suggests \
     --no-conflicts --no-breaks --no-replaces --no-enhances \
     "${PACKAGES[@]}" 2>/dev/null | grep "^\w" | sort -u)
 
-info "下载 $(echo "$ALL_DEPS" | wc -l) 个包..."
+info "Downloading $(echo "$ALL_DEPS" | wc -l) packages..."
 cd "${DEB_DIR}"
 FAIL=0
 for pkg in $ALL_DEPS; do
@@ -45,4 +45,4 @@ for pkg in "${PACKAGES[@]}"; do
 done
 
 DEB_COUNT=$(ls -1 "${DEB_DIR}"/*.deb 2>/dev/null | wc -l)
-info "完成: ${DEB_COUNT} 个 deb 包 (${FAIL} 个跳过)"
+info "Done: ${DEB_COUNT} deb packages (${FAIL} skipped)"
