@@ -24,8 +24,7 @@
 #   destroy-pxe     Destroy VM 746
 #   destroy-target  Destroy VM 747
 #   swap-iso        VM 746: swap CD-ROM to RHEL ISO + disk-first boot
-#   extract         Extract scripts from 02_build_iso.sh to .dev_extracted/
-#   deploy          SCP extracted scripts to VM 746
+#   deploy          SCP scripts to VM 746
 #   ssh-builder     SSH to VM 745
 #   ssh-pxe         SSH to VM 746
 #   status          Show VM 746/747 status
@@ -41,7 +40,7 @@ step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_SCRIPT="${SCRIPT_DIR}/02_build_iso.sh"
-EXTRACT_DIR="${SCRIPT_DIR}/.dev_extracted"
+EXTRACT_DIR="${SCRIPT_DIR}/scripts"
 
 #============================================================================
 # *** Configuration — modify for your environment ***
@@ -78,8 +77,9 @@ cmd_build() {
 
     [[ ! -f "${BUILD_SCRIPT}" ]] && error "Not found: ${BUILD_SCRIPT}"
 
-    step "[1/3] SCP 02_build_iso.sh to VM 745 (builder)..."
+    step "[1/3] SCP 02_build_iso.sh + scripts/ to VM 745 (builder)..."
     scp "${BUILD_SCRIPT}" "${BUILDER_HOST}:/root/"
+    scp -r "${SCRIPT_DIR}/scripts" "${BUILDER_HOST}:/root/"
     info "Upload complete"
 
     step "[2/3] Building ISO on VM 745..."
@@ -185,52 +185,19 @@ cmd_swap_iso() {
 }
 
 #============================================================================
-# extract — Extract scripts from 02_build_iso.sh
+# extract — No longer needed (scripts are standalone in scripts/)
 #============================================================================
 cmd_extract() {
-    step "Extracting embedded scripts from ${BUILD_SCRIPT}..."
-
-    [[ ! -f "${BUILD_SCRIPT}" ]] && error "Not found: ${BUILD_SCRIPT}"
-
-    rm -rf "${EXTRACT_DIR}"
-    mkdir -p "${EXTRACT_DIR}"
-
-    # setup_pxe.sh: extract 'SETUPEOF' heredoc
-    sed -n "/^cat > .*setup_pxe.sh.*'SETUPEOF'/,/^SETUPEOF$/p" "${BUILD_SCRIPT}" \
-        | sed '1d;$d' > "${EXTRACT_DIR}/setup_pxe.sh"
-
-    # mount_disc.sh: extract 'MOUNTEOF' heredoc
-    sed -n "/^cat > .*mount_disc.sh.*'MOUNTEOF'/,/^MOUNTEOF$/p" "${BUILD_SCRIPT}" \
-        | sed '1d;$d' > "${EXTRACT_DIR}/mount_disc.sh"
-
-    # manage_hosts.sh: extract 'HOSTSEOF' heredoc
-    sed -n "/^cat > .*manage_hosts.sh.*'HOSTSEOF'/,/^HOSTSEOF$/p" "${BUILD_SCRIPT}" \
-        | sed '1d;$d' > "${EXTRACT_DIR}/manage_hosts.sh"
-
-    chmod +x "${EXTRACT_DIR}"/*.sh
-
-    # Verify
-    local ok=1
-    for f in setup_pxe.sh mount_disc.sh manage_hosts.sh; do
-        if [[ -s "${EXTRACT_DIR}/${f}" ]]; then
-            local lines
-            lines=$(wc -l < "${EXTRACT_DIR}/${f}")
-            info "  ${f} (${lines} lines)"
-        else
-            warn "  ${f} extraction failed or empty!"
-            ok=0
-        fi
-    done
-
-    [[ ${ok} -eq 1 ]] && info "Extraction complete: ${EXTRACT_DIR}/" || error "Some scripts failed to extract"
+    info "Scripts are now standalone in scripts/ — extraction is no longer needed."
+    info "Use 'deploy' directly."
 }
 
 #============================================================================
-# deploy — SCP extracted scripts to VM 746
+# deploy — SCP scripts to VM 746
 #============================================================================
 cmd_deploy() {
     [[ -z "${PXE_VM_IP}" ]] && error "Set PXE_VM_IP first (VM 746 DHCP address)"
-    [[ ! -d "${EXTRACT_DIR}" ]] && error "Run first: $0 extract"
+    [[ ! -d "${EXTRACT_DIR}" ]] && error "Missing: ${EXTRACT_DIR}/"
 
     step "Deploying scripts to VM ${PXE_VM_ID} (${PXE_VM_USER}@${PXE_VM_IP})..."
 
@@ -301,8 +268,8 @@ usage() {
     echo "  status          Show VM 746/747 status"
     echo ""
     echo "Script Iteration:"
-    echo "  extract         Extract scripts from 02_build_iso.sh to .dev_extracted/"
-    echo "  deploy          SCP extracted scripts to VM 746"
+    echo "  extract         (deprecated — scripts are standalone in scripts/)"
+    echo "  deploy          SCP scripts to VM 746"
     echo ""
     echo "SSH:"
     echo "  ssh-builder     SSH to VM 745 (builder)"
@@ -311,7 +278,7 @@ usage() {
     echo "Typical workflow:"
     echo "  $0 build && $0 create-pxe && $0 start-pxe"
     echo "  # Wait for install -> swap-iso -> SSH in to test manually"
-    echo "  $0 extract && $0 deploy   # Quick script iteration"
+    echo "  $0 deploy                  # Quick script deploy"
     echo ""
 }
 

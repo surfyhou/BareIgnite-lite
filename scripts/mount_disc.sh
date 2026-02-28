@@ -166,6 +166,12 @@ fi
 [[ -z "${OS_ID}" ]] && OS_ID="os_unknown"
 [[ -z "${OS_NAME}" ]] && OS_NAME="Unknown OS"
 
+# Auto-detect extra kernel boot parameters
+BOOT_EXTRA=""
+if echo "${OS_FAMILY}" | grep -qi "NFSCNS\|neokylin"; then
+    BOOT_EXTRA="mem_encrypt=off"
+fi
+
 echo ""
 info "Detected OS:"
 echo "  Name:    ${OS_NAME}"
@@ -180,6 +186,7 @@ if [[ ${AUTO_MODE} -eq 1 ]]; then
     OS_NAME=${PXE_OS_NAME:-${OS_NAME}}
     TARGET_DISK=${PXE_TARGET_DISK:-sda}
     ROOT_PASSWORD=${PXE_ROOT_PASSWORD:-P@ssw0rd123}
+    BOOT_EXTRA=${PXE_BOOT_EXTRA:-${BOOT_EXTRA}}
 else
     read -p "  OS ID [${OS_ID}]: " input_id
     OS_ID=${input_id:-${OS_ID}}
@@ -192,6 +199,9 @@ else
 
     read -p "  Root password [P@ssw0rd123]: " ROOT_PASSWORD
     ROOT_PASSWORD=${ROOT_PASSWORD:-P@ssw0rd123}
+
+    read -p "  Extra kernel args [${BOOT_EXTRA}]: " input_extra
+    BOOT_EXTRA=${input_extra:-${BOOT_EXTRA}}
 fi
 
 echo ""
@@ -202,6 +212,7 @@ echo "  Source:      ${SOURCE_TYPE}"
 echo "  PXE server:  ${SERVER_IP}"
 echo "  Target disk: ${TARGET_DISK}"
 echo "  Root passwd: ${ROOT_PASSWORD}"
+echo "  Boot extra: ${BOOT_EXTRA:-(none)}"
 echo ""
 if [[ ${AUTO_MODE} -eq 0 ]]; then
     read -p "  Confirm? [Y/n]: " confirm
@@ -348,7 +359,7 @@ info "Kickstart generated: ks-${OS_ID}-bios.cfg / ks-${OS_ID}-uefi.cfg"
 touch "${REGISTRY_FILE}"
 # Remove old record for this OS_ID (if any)
 sed -i "/^${OS_ID}|/d" "${REGISTRY_FILE}"
-echo "${OS_ID}|${OS_NAME}|${TARGET_DISK}|${ROOT_PASSWORD}" >> "${REGISTRY_FILE}"
+echo "${OS_ID}|${OS_NAME}|${TARGET_DISK}|${ROOT_PASSWORD}|${BOOT_EXTRA}" >> "${REGISTRY_FILE}"
 info "Registered: ${OS_ID} -> ${REGISTRY_FILE}"
 
 #--- 10. Regenerate PXE default menus ---
@@ -359,10 +370,12 @@ regenerate_pxe_menus() {
     # Read all registered OSes
     local OS_IDS=()
     local OS_NAMES=()
-    while IFS='|' read -r oid oname odisk opwd; do
+    local OS_EXTRAS=()
+    while IFS='|' read -r oid oname odisk opwd oextra; do
         [[ -z "$oid" || "$oid" == \#* ]] && continue
         OS_IDS+=("$oid")
         OS_NAMES+=("$oname")
+        OS_EXTRAS+=("$oextra")
     done < "${REGISTRY_FILE}"
 
     [[ ${#OS_IDS[@]} -eq 0 ]] && return
@@ -382,11 +395,12 @@ regenerate_pxe_menus() {
         for i in "${!OS_IDS[@]}"; do
             local oid="${OS_IDS[$i]}"
             local oname="${OS_NAMES[$i]}"
+            local oextra="${OS_EXTRAS[$i]}"
             echo "LABEL ${oid}_ks"
             echo "  MENU LABEL ^${idx}. Install ${oname} (Kickstart Auto)"
             [[ "$oid" == "$DEFAULT_ID" ]] && echo "  MENU DEFAULT"
             echo "  KERNEL ${oid}/vmlinuz"
-            echo "  APPEND initrd=${oid}/initrd.img inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-bios.cfg ip=dhcp"
+            echo "  APPEND initrd=${oid}/initrd.img inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-bios.cfg ip=dhcp${oextra:+ ${oextra}}"
             echo ""
             ((idx++))
         done
@@ -430,8 +444,9 @@ regenerate_pxe_menus() {
         for i in "${!OS_IDS[@]}"; do
             local oid="${OS_IDS[$i]}"
             local oname="${OS_NAMES[$i]}"
+            local oextra="${OS_EXTRAS[$i]}"
             echo "menuentry 'Install ${oname} (Kickstart Auto)' {"
-            echo "  linuxefi ${oid}/vmlinuz inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-uefi.cfg ip=dhcp"
+            echo "  linuxefi ${oid}/vmlinuz inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-uefi.cfg ip=dhcp${oextra:+ ${oextra}}"
             echo "  initrdefi ${oid}/initrd.img"
             echo "}"
             echo ""
@@ -452,10 +467,11 @@ regenerate_pxe_menus() {
             local mac_dash
             mac_dash=$(echo "$mac" | tr ':' '-' | tr '[:upper:]' '[:lower:]')
             local mac_file="${_TFTP}/pxelinux.cfg/01-${mac_dash}"
-            # Find OS name
+            # Find OS name and extra boot params
             local oname="$oid"
+            local oextra=""
             for j in "${!OS_IDS[@]}"; do
-                [[ "${OS_IDS[$j]}" == "$oid" ]] && { oname="${OS_NAMES[$j]}"; break; }
+                [[ "${OS_IDS[$j]}" == "$oid" ]] && { oname="${OS_NAMES[$j]}"; oextra="${OS_EXTRAS[$j]}"; break; }
             done
             {
                 echo "DEFAULT ${oid}_ks"
@@ -465,7 +481,7 @@ regenerate_pxe_menus() {
                 echo "LABEL ${oid}_ks"
                 echo "  MENU LABEL Install ${oname} (Kickstart Auto)"
                 echo "  KERNEL ${oid}/vmlinuz"
-                echo "  APPEND initrd=${oid}/initrd.img inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-bios.cfg ip=dhcp"
+                echo "  APPEND initrd=${oid}/initrd.img inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-bios.cfg ip=dhcp${oextra:+ ${oextra}}"
             } > "${mac_file}"
         done < "${HOSTS_FILE}"
     fi
@@ -503,7 +519,7 @@ echo ""
 
 echo ""
 info "Registered OSes:"
-while IFS='|' read -r oid oname odisk opwd; do
+while IFS='|' read -r oid oname odisk opwd oextra; do
     [[ -z "$oid" || "$oid" == \#* ]] && continue
     echo "  - ${oid}: ${oname}"
 done < "${REGISTRY_FILE}"

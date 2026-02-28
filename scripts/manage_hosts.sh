@@ -46,7 +46,7 @@ list_os() {
     info "Registered OSes:"
     echo ""
     local idx=1
-    while IFS='|' read -r oid oname odisk opwd; do
+    while IFS='|' read -r oid oname odisk opwd oextra; do
         [[ -z "$oid" || "$oid" == \#* ]] && continue
         echo "  ${idx}) ${oid}  -  ${oname}  (disk: ${odisk})"
         ((idx++))
@@ -67,7 +67,7 @@ list_hosts() {
         [[ -z "$mac" || "$mac" == \#* ]] && continue
         # Find OS name
         local oname="$oid"
-        while IFS='|' read -r rid rname rdisk rpwd; do
+        while IFS='|' read -r rid rname rdisk rpwd rextra; do
             [[ "$rid" == "$oid" ]] && { oname="$rname"; break; }
         done < "${REGISTRY_FILE}"
         echo "  ${idx}) ${mac}  ->  ${oid} (${oname})"
@@ -103,7 +103,7 @@ add_host() {
     local os_ids=()
     local os_names=()
     local idx=1
-    while IFS='|' read -r oid oname odisk opwd; do
+    while IFS='|' read -r oid oname odisk opwd oextra; do
         [[ -z "$oid" || "$oid" == \#* ]] && continue
         echo "  ${idx}) ${oid}  -  ${oname}"
         os_ids+=("$oid")
@@ -144,7 +144,7 @@ del_host() {
     while read -r mac oid; do
         [[ -z "$mac" || "$mac" == \#* ]] && continue
         local oname="$oid"
-        while IFS='|' read -r rid rname rdisk rpwd; do
+        while IFS='|' read -r rid rname rdisk rpwd rextra; do
             [[ "$rid" == "$oid" ]] && { oname="$rname"; break; }
         done < "${REGISTRY_FILE}"
         echo "  ${idx}) ${mac}  ->  ${oid} (${oname})"
@@ -204,8 +204,8 @@ batch_add_host() {
     fi
 
     local count=$(( end_int - start_int + 1 ))
-    if [[ $count -gt 1000 ]]; then
-        warn "Range too large (${count} MACs, max 1000)"
+    if [[ $count -gt 65536 ]]; then
+        warn "Range too large (${count} MACs, max 65536)"
         return
     fi
 
@@ -215,7 +215,7 @@ batch_add_host() {
     local os_ids=()
     local os_names=()
     local idx=1
-    while IFS='|' read -r oid oname odisk opwd; do
+    while IFS='|' read -r oid oname odisk opwd oextra; do
         [[ -z "$oid" || "$oid" == \#* ]] && continue
         echo "  ${idx}) ${oid}  -  ${oname}"
         os_ids+=("$oid")
@@ -264,10 +264,12 @@ apply_config() {
     # Read all registered OSes
     local OS_IDS=()
     local OS_NAMES=()
-    while IFS='|' read -r oid oname odisk opwd; do
+    local OS_EXTRAS=()
+    while IFS='|' read -r oid oname odisk opwd oextra; do
         [[ -z "$oid" || "$oid" == \#* ]] && continue
         OS_IDS+=("$oid")
         OS_NAMES+=("$oname")
+        OS_EXTRAS+=("$oextra")
     done < "${REGISTRY_FILE}"
 
     if [[ ${#OS_IDS[@]} -eq 0 ]]; then
@@ -290,11 +292,12 @@ apply_config() {
         for i in "${!OS_IDS[@]}"; do
             local oid="${OS_IDS[$i]}"
             local oname="${OS_NAMES[$i]}"
+            local oextra="${OS_EXTRAS[$i]}"
             echo "LABEL ${oid}_ks"
             echo "  MENU LABEL ^${idx}. Install ${oname} (Kickstart Auto)"
             [[ "$oid" == "$DEFAULT_ID" ]] && echo "  MENU DEFAULT"
             echo "  KERNEL ${oid}/vmlinuz"
-            echo "  APPEND initrd=${oid}/initrd.img inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-bios.cfg ip=dhcp"
+            echo "  APPEND initrd=${oid}/initrd.img inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-bios.cfg ip=dhcp${oextra:+ ${oextra}}"
             echo ""
             ((idx++))
         done
@@ -337,8 +340,9 @@ apply_config() {
         for i in "${!OS_IDS[@]}"; do
             local oid="${OS_IDS[$i]}"
             local oname="${OS_NAMES[$i]}"
+            local oextra="${OS_EXTRAS[$i]}"
             echo "menuentry 'Install ${oname} (Kickstart Auto)' {"
-            echo "  linuxefi ${oid}/vmlinuz inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-uefi.cfg ip=dhcp"
+            echo "  linuxefi ${oid}/vmlinuz inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-uefi.cfg ip=dhcp${oextra:+ ${oextra}}"
             echo "  initrdefi ${oid}/initrd.img"
             echo "}"
             echo ""
@@ -359,8 +363,9 @@ apply_config() {
             mac_dash=$(echo "$mac" | tr ':' '-' | tr '[:upper:]' '[:lower:]')
             local mac_file="${TFTP_ROOT}/pxelinux.cfg/01-${mac_dash}"
             local oname="$oid"
+            local oextra=""
             for j in "${!OS_IDS[@]}"; do
-                [[ "${OS_IDS[$j]}" == "$oid" ]] && { oname="${OS_NAMES[$j]}"; break; }
+                [[ "${OS_IDS[$j]}" == "$oid" ]] && { oname="${OS_NAMES[$j]}"; oextra="${OS_EXTRAS[$j]}"; break; }
             done
             {
                 echo "DEFAULT ${oid}_ks"
@@ -370,7 +375,7 @@ apply_config() {
                 echo "LABEL ${oid}_ks"
                 echo "  MENU LABEL Install ${oname} (Kickstart Auto)"
                 echo "  KERNEL ${oid}/vmlinuz"
-                echo "  APPEND initrd=${oid}/initrd.img inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-bios.cfg ip=dhcp"
+                echo "  APPEND initrd=${oid}/initrd.img inst.repo=http://${SERVER_IP}/${oid} inst.ks=http://${SERVER_IP}/ks-${oid}-bios.cfg ip=dhcp${oextra:+ ${oextra}}"
             } > "${mac_file}"
             info "  Generated: 01-${mac_dash} -> ${oid}"
         done < "${HOSTS_FILE}"
@@ -461,8 +466,8 @@ cli_batch_add_host() {
     fi
 
     local count=$(( end_int - start_int + 1 ))
-    if [[ $count -gt 1000 ]]; then
-        error "Range too large (${count} MACs, max 1000)"
+    if [[ $count -gt 65536 ]]; then
+        error "Range too large (${count} MACs, max 65536)"
     fi
 
     local added=0
