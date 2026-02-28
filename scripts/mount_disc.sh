@@ -250,6 +250,7 @@ mkdir -p "${TFTP_ROOT}/${OS_ID}"
 if [[ -f "${OS_DIR}/images/pxeboot/vmlinuz" ]]; then
     cp "${OS_DIR}/images/pxeboot/vmlinuz"    "${TFTP_ROOT}/${OS_ID}/"
     cp "${OS_DIR}/images/pxeboot/initrd.img" "${TFTP_ROOT}/${OS_ID}/"
+    chmod 644 "${TFTP_ROOT}/${OS_ID}/vmlinuz" "${TFTP_ROOT}/${OS_ID}/initrd.img"
     info "Kernel copied to ${TFTP_ROOT}/${OS_ID}/"
 else
     warn "images/pxeboot/vmlinuz not found"
