@@ -303,6 +303,7 @@ url --url=http://${SERVER_IP}/${L_OS_ID}
 firewall --disabled
 selinux --disabled
 services --disabled=firewalld
+eula --agreed
 
 %addon com_redhat_kdump --disable
 %end
